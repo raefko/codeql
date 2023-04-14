@@ -1,40 +1,36 @@
-import java
-import semmle.code.java.security.BufferAllocation
+/**
+ * @name Implicit narrowing conversion in compound assignment
+ * @description Compound assignment statements (for example 'intvar += longvar') that implicitly
+ *              cast a value of a wider type to a narrower type may result in information loss and
+ *              numeric errors such as overflows.
+ * @kind problem
+ * @problem.severity warning
+ * @security-severity 8.1
+ * @precision very-high
+ * @id java/implicit-cast-in-compound-assignment
+ * @tags reliability
+ *       security
+ *       external/cwe/cwe-190
+ *       external/cwe/cwe-192
+ *       external/cwe/cwe-197
+ *       external/cwe/cwe-681
+ */
 
-class UncheckedBufferAllocation extends BufferAllocation {
-  UncheckedBufferAllocation() {
-    // Look for the creation of a buffer whose size is computed from untrusted data.
-    // The buffer is created but there is no check to ensure that its size is within
-    // safe bounds.
-    this = "Buffer allocation without size check";
-  }
+import semmle.code.java.arithmetic.Overflow
 
-  override predicate isSource(DataFlow::Node source) {
-    exists (MethodAccess ma |
-      ma.getMethod().getName() = "read" and
-      ma.getQualifier().getType().toString().matches(".*(InputStream|Reader)") and
-      source.asExpr() = ma.getArgument(1)
-    )
-  }
-
-  override predicate isSink(DataFlow::Node sink) {
-    exists (MethodAccess ma |
-      ma.getMethod().getName() = "read" and
-      ma.getQualifier().getType().toString().matches(".*(InputStream|Reader)") and
-      sink.asExpr() = ma.getQualifier()
-    )
-  }
-
-  override predicate isSanitizer(DataFlow::Node sanitizer) {
-    exists (MethodAccess ma |
-      ma.getMethod().getName() = "skip" and
-      ma.getQualifier().getType().toString().matches(".*(InputStream|Reader)") and
-      sanitizer.asExpr() = ma.getQualifier()
-    )
+class DangerousAssignOpExpr extends AssignOp {
+  DangerousAssignOpExpr() {
+    this instanceof AssignAddExpr or
+    this instanceof AssignMulExpr
   }
 }
 
-from UncheckedBufferAllocation uba
-where uba.hasFlow()
-and uba.getAllocation().getType().toString().matches("byte\\[\\]")
-select uba.getAllocation(), uba.getFlow(), uba.getSource(), uba.getSink(), uba.getSanitizer()
+predicate problematicCasting(Type t, Expr e) { e.getType().(NumType).widerThan(t) }
+
+from DangerousAssignOpExpr a, Expr e
+where
+  e = a.getSource() and
+  problematicCasting(a.getDest().getType(), e)
+select a,
+  "Implicit cast of source type " + e.getType().getName() + " to narrower destination type " +
+    a.getDest().getType().getName() + "."
